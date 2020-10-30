@@ -41,10 +41,81 @@ def _include_part(part_list, part_idx):
             return True, part
     return False, None
 
+def angle_between_points( p0, p1, p2 ):
+  a = (p1[0]-p0[0])**2 + (p1[1]-p0[1])**2
+  b = (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2
+  c = (p2[0]-p0[0])**2 + (p2[1]-p0[1])**2
+  return  math.acos( (a+b-c) / math.sqrt(4*a*b) ) * 180 /math.pi
+
+def length_between_points(p0, p1):
+    return math.hypot(p1[0]- p0[0], p1[1]-p0[1])
+
+def get_angle_point(human, pos, image_w, image_h):
+    pnts = []
+
+    if pos == 'nose_neck_lhip':
+        pos_list = (0,1,11)
+    elif pos == 'left_elbow':
+        pos_list = (5,6,7)
+    elif pos == 'left_hand':
+        pos_list = (11,5,7)
+    elif pos == 'left_knee':
+        pos_list = (11,12,13)
+    elif pos == 'left_ankle':
+        pos_list = (5,11,13)
+    elif pos == 'right_elbow':
+        pos_list = (2,3,4)
+    elif pos == 'right_hand':
+        pos_list = (8,2,4)
+    elif pos == 'right_knee':
+        pos_list = (8,9,10)
+    elif pos == 'right_ankle':
+        pos_list = (2,8,10)
+    else:
+        logger.error('Unknown  [%s]', pos)
+        return pnts
+
+    for i in range(3):
+        if pos_list[i] not in human.body_parts.keys():
+            logger.info('component [%d] incomplete', pos_list[i])
+            return pnts
+        p = human.body_parts[pos_list[i]]
+        pnts.append((int(p.x * image_w + 0.5), int(p.y * image_h + 0.5)))
+    return pnts
+
+def get_nose_neck_lhip_angle(human, image_w, image_h):
+    pnts = get_angle_point(human, 'nose_neck_lhip', image_w, image_h)
+    if len(pnts) != 3:
+        logger.info('component incomplete')
+        return -1
+
+    angle = 0
+    if pnts is not None:
+        angle = angle_between_points(pnts[0], pnts[1], pnts[2])
+        logger.info('nose_neck_lshoulder:%f'%(angle))
+    return angle
 
 class Human:
     """
     body_parts: list of BodyPart
+    No:0	Name[CocoPart.Nose]
+    No:1	Name[CocoPart.Neck]
+    No:2	Name[CocoPart.RShoulder]
+    No:3	Name[CocoPart.RElbow]
+    No:4	Name[CocoPart.RWrist]
+    No:5	Name[CocoPart.LShoulder]
+    No:6	Name[CocoPart.LElbow]
+    No:7	Name[CocoPart.LWrist]
+    No:8	Name[CocoPart.RHip]
+    No:9	Name[CocoPart.RKnee]
+    No:10	Name[CocoPart.RAnkle]
+    No:11	Name[CocoPart.LHip]
+    No:12	Name[CocoPart.LKnee]
+    No:13	Name[CocoPart.LAnkle]
+    No:14	Name[CocoPart.REye]
+    No:15	Name[CocoPart.LEye]
+    No:16	Name[CocoPart.REar]
+    No:17	Name[CocoPart.LEar]
     """
     __slots__ = ('body_parts', 'pairs', 'uidx_list', 'score')
 
@@ -411,6 +482,7 @@ class TfPoseEstimator:
             npimg = np.copy(npimg)
         image_h, image_w = npimg.shape[:2]
         centers = {}
+        nose_neck_lshoulder_angles = []
         for human in humans:
             # draw point
             for i in range(common.CocoPart.Background.value):
@@ -430,7 +502,10 @@ class TfPoseEstimator:
                 # npimg = cv2.line(npimg, centers[pair[0]], centers[pair[1]], common.CocoColors[pair_order], 3)
                 cv2.line(npimg, centers[pair[0]], centers[pair[1]], common.CocoColors[pair_order], 3)
 
-        return npimg
+            # show angle
+            nose_neck_lshoulder_angles.append(get_nose_neck_lhip_angle(human, image_h, image_w))
+
+        return npimg, nose_neck_lshoulder_angles
 
     def _get_scaled_img(self, npimg, scale):
         get_base_scale = lambda s, w, h: max(self.target_size[0] / float(h), self.target_size[1] / float(w)) * s

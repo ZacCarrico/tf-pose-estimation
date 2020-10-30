@@ -50,14 +50,14 @@ if __name__ == '__main__':
 
     logger.info('inference image: %s in %.4f seconds.' % (args.image, elapsed))
 
-    image = TfPoseEstimator.draw_humans(image, humans, imgcopy=False)
+    image, nose_neck_lshoulder_angles = TfPoseEstimator.draw_humans(image, humans, imgcopy=False)
 
     try:
         import matplotlib.pyplot as plt
 
         fig = plt.figure()
         a = fig.add_subplot(2, 2, 1)
-        a.set_title('Result')
+        a.set_title(str(nose_neck_lshoulder_angles))
         plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
         bgimg = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2RGB)
