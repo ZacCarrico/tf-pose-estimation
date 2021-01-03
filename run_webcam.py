@@ -1,9 +1,8 @@
 import argparse
 import logging
+import sqlite3
 import time
-
 import cv2
-import numpy as np
 
 from tf_pose.estimator import TfPoseEstimator
 from tf_pose.networks import get_graph_path, model_wh
@@ -15,8 +14,12 @@ ch.setLevel(logging.DEBUG)
 formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
+sql_conn = sqlite3.connect('posture.db')
+sql_cursor = sql_conn.cursor()
 
 fps_time = 0
+
+NECK_ANGLE_THRESHOLD = 145
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -50,6 +53,7 @@ if __name__ == '__main__':
     ret_val, image = cam.read()
     logger.info('cam image=%dx%d' % (image.shape[1], image.shape[0]))
 
+    measurements_file = open("measurements.csv", "a")
     while True:
         ret_val, image = cam.read()
 
@@ -58,16 +62,29 @@ if __name__ == '__main__':
 
         logger.debug('postprocess+')
         image, angle = TfPoseEstimator.draw_humans(image, humans, imgcopy=False)
+        if angle:
+            angle = int(angle[0])
+        else:
+            angle = -1
+        if angle != -1:
+            sql_cursor.execute(
+                """INSERT INTO neck_angle(angle) VALUES ({})""".format(angle)
+            )
+            sql_conn.commit()
 
         logger.debug('show+')
         cv2.putText(image,
                     "angle: " + str(angle) + ", FPS: %f" % (1.0 / (time.time() - fps_time)),
                     (10, 10),  cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     (0, 255, 0), 2)
-        cv2.imshow('tf-pose-estimation result', image)
+        if angle != -1 and angle < NECK_ANGLE_THRESHOLD:
+            cv2.imshow('tf-pose-estimation result', image)
+            if cv2.waitKey(1) == 27:
+                break
+            time.sleep(1)
+            cv2.destroyAllWindows()
         fps_time = time.time()
-        if cv2.waitKey(1) == 27:
-            break
         logger.debug('finished+')
 
+    sql_conn.close()
     cv2.destroyAllWindows()
