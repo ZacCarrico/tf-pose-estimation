@@ -19,7 +19,7 @@ sql_cursor = sql_conn.cursor()
 
 fps_time = 0
 
-NECK_ANGLE_THRESHOLD = 145
+NECK_ANGLE_THRESHOLD = 140
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")

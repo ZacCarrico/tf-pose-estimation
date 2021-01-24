@@ -45,7 +45,10 @@ def angle_between_points( p0, p1, p2 ):
   a = (p1[0]-p0[0])**2 + (p1[1]-p0[1])**2
   b = (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2
   c = (p2[0]-p0[0])**2 + (p2[1]-p0[1])**2
-  return  math.acos( (a+b-c) / math.sqrt(4*a*b) ) * 180 /math.pi
+  if a and b:
+      return  math.acos( (a+b-c) / math.sqrt(4*a*b) ) * 180 /math.pi
+  else:
+      return -1
 
 def length_between_points(p0, p1):
     return math.hypot(p1[0]- p0[0], p1[1]-p0[1])
