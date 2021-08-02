@@ -1,16 +1,19 @@
-import argparse
 import logging
+import queue as Queue
 import sqlite3
+import threading
 import time
+
+import argparse
 import cv2
 
 from tf_pose.estimator import TfPoseEstimator
 from tf_pose.networks import get_graph_path, model_wh
 
 logger = logging.getLogger('TfPoseEstimator-WebCam')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
+ch.setLevel(logging.INFO)
 formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
@@ -24,6 +27,36 @@ NECK_ANGLE_THRESHOLD = 140
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
+
+# bufferless VideoCapture
+class VideoCapture:
+    """
+    class copied from
+    https://stackoverflow.com/questions/54460797/how-to-disable-buffer-in-opencv-camera
+    """
+
+    def __init__(self, name):
+        self.cap = cv2.VideoCapture(name)
+        self.q = Queue.Queue()
+        t = threading.Thread(target=self._reader)
+        t.daemon = True
+        t.start()
+
+  # read frames as soon as they are available, keeping only most recent one
+    def _reader(self):
+      while True:
+        ret, frame = self.cap.read()
+        if not ret:
+          break
+        if not self.q.empty():
+          try:
+            self.q.get_nowait()   # discard previous (unprocessed) frame
+          except Queue.Empty:
+            pass
+        self.q.put(frame)
+
+    def read(self):
+      return self.q.get()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='tf-pose-estimation realtime webcam')
@@ -49,15 +82,16 @@ if __name__ == '__main__':
     else:
         e = TfPoseEstimator(get_graph_path(args.model), target_size=(432, 368), trt_bool=str2bool(args.tensorrt))
     logger.debug('cam read+')
-    cam = cv2.VideoCapture(args.camera)
-    ret_val, image = cam.read()
+    cam = VideoCapture(args.camera)
+    image = cam.read()
     logger.info('cam image=%dx%d' % (image.shape[1], image.shape[0]))
 
-    measurements_file = open("measurements.csv", "a")
     while True:
-        ret_val, image = cam.read()
+        image = cam.read()
 
         logger.debug('image process+')
+
+        # this takes about 0.3s on a CPU
         humans = e.inference(image, resize_to_default=(w > 0 and h > 0), upsample_size=args.resize_out_ratio)
 
         logger.debug('postprocess+')
@@ -83,8 +117,6 @@ if __name__ == '__main__':
                 break
             time.sleep(1)
             cv2.destroyAllWindows()
-        fps_time = time.time()
-        logger.debug('finished+')
 
     sql_conn.close()
     cv2.destroyAllWindows()
