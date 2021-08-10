@@ -28,7 +28,6 @@ ch = logging.StreamHandler()
 formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
-logger.setLevel(logging.INFO)
 
 
 def _round(v):
@@ -80,7 +79,7 @@ def get_angle_point(human, pos, image_w, image_h):
 
     for i in range(3):
         if pos_list[i] not in human.body_parts.keys():
-            logger.info('component [%d] incomplete', pos_list[i])
+            logger.debug('component [%d] incomplete', pos_list[i])
             return pnts
         p = human.body_parts[pos_list[i]]
         pnts.append((int(p.x * image_w + 0.5), int(p.y * image_h + 0.5)))
@@ -89,13 +88,13 @@ def get_angle_point(human, pos, image_w, image_h):
 def get_nose_neck_lhip_angle(human, image_w, image_h):
     pnts = get_angle_point(human, 'nose_neck_lhip', image_w, image_h)
     if len(pnts) != 3:
-        logger.info('component incomplete')
+        logger.debug('component incomplete')
         return -1
 
     angle = 0
     if pnts is not None:
         angle = angle_between_points(pnts[0], pnts[1], pnts[2])
-        logger.info('nose_neck_lshoulder:%f'%(angle))
+        logger.debug('nose_neck_lshoulder:%f'%(angle))
     return angle
 
 class Human:

@@ -20,6 +20,11 @@ logger.addHandler(ch)
 sql_conn = sqlite3.connect('posture.db')
 sql_cursor = sql_conn.cursor()
 
+fh = logging.FileHandler('info.log', "w")
+fh.setLevel(logging.INFO)
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+
 fps_time = 0
 
 NECK_ANGLE_THRESHOLD = 140
@@ -86,9 +91,10 @@ if __name__ == '__main__':
     image = cam.read()
     logger.info('cam image=%dx%d' % (image.shape[1], image.shape[0]))
 
+    successes = 0
+    count = 0
     while True:
         image = cam.read()
-
         logger.debug('image process+')
 
         # this takes about 0.3s on a CPU
@@ -105,6 +111,10 @@ if __name__ == '__main__':
                 """INSERT INTO neck_angle(angle) VALUES ({})""".format(angle)
             )
             sql_conn.commit()
+            count += 1
+            if angle >= NECK_ANGLE_THRESHOLD:
+                successes += 1
+            logger.info("good/total neck angle: " + str(round(successes / count, 2)))
 
         logger.debug('show+')
         cv2.putText(image,
