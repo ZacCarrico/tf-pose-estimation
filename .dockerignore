@@ -20,4 +20,4 @@ graph*.pb
 chk*.meta
 lifting
 slim
-
+*venv
