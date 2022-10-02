@@ -27,7 +27,7 @@ logger.addHandler(fh)
 
 fps_time = 0
 
-NECK_ANGLE_THRESHOLD = 140
+NECK_ANGLE_THRESHOLD = 138
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -125,7 +125,7 @@ if __name__ == '__main__':
             cv2.imshow('tf-pose-estimation result', image)
             if cv2.waitKey(1) == 27:
                 break
-            time.sleep(1)
+            time.sleep(2)
             cv2.destroyAllWindows()
 
     sql_conn.close()
