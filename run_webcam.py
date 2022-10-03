@@ -63,9 +63,25 @@ class VideoCapture:
     def read(self):
       return self.q.get()
 
+
+def read_imgfile(path, width=432, height=368):
+        return cv2.imread(path)
+    # return preprocess(val_image, width, height)
+    # import pickle
+    # with open("webcam_image_2", "rb") as f:
+    #     wi2 = pickle.load(f)
+    # e = TfPoseEstimator(get_graph_path(args.model), target_size=(432, 368), trt_bool=str2bool(args.tensorrt))
+    # import pdb; pdb.set_trace()
+
+def preprocess(img, width, height):
+    val_image = cv2.resize(img, (width, height))
+    val_image = val_image.astype(float)
+    val_image = val_image * (2.0 / 255.0) - 1.0
+    return val_image
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='tf-pose-estimation realtime webcam')
-    parser.add_argument('--camera', type=int, default=0)
+    parser.add_argument('--image_path', type=str)
 
     parser.add_argument('--resize', type=str, default='0x0',
                         help='if provided, resize images before they are processed. default=0x0, Recommends : 432x368 or 656x368 or 1312x736 ')
@@ -86,47 +102,54 @@ if __name__ == '__main__':
         e = TfPoseEstimator(get_graph_path(args.model), target_size=(w, h), trt_bool=str2bool(args.tensorrt))
     else:
         e = TfPoseEstimator(get_graph_path(args.model), target_size=(432, 368), trt_bool=str2bool(args.tensorrt))
-    logger.debug('cam read+')
-    cam = VideoCapture(args.camera)
-    image = cam.read()
+    logger.debug('image read+')
+    # cam = VideoCapture(args.camera)
+    # image = cam.read()
+    image = read_imgfile(args.image_path)
+    # import pdb;pdb.set_trace()
     logger.info('cam image=%dx%d' % (image.shape[1], image.shape[0]))
 
     successes = 0
     count = 0
-    while True:
-        image = cam.read()
-        logger.debug('image process+')
+    logger.debug('image process+')
 
-        # this takes about 0.3s on a CPU
-        humans = e.inference(image, resize_to_default=(w > 0 and h > 0), upsample_size=args.resize_out_ratio)
+    import matplotlib.pyplot as plt
 
-        logger.debug('postprocess+')
-        image, angle = TfPoseEstimator.draw_humans(image, humans, imgcopy=False)
-        if angle:
-            angle = int(angle[0])
-        else:
-            angle = -1
-        if angle != -1:
-            sql_cursor.execute(
-                """INSERT INTO neck_angle(angle) VALUES ({})""".format(angle)
-            )
-            sql_conn.commit()
-            count += 1
-            if angle >= NECK_ANGLE_THRESHOLD:
-                successes += 1
-            logger.info("good/total neck angle: " + str(round(successes / count, 2)))
+    plt.imshow(image)
+    plt.show()
+    # this takes about 0.3s on a CPU
+    import pdb;pdb.set_trace()
+    humans = e.inference(image, resize_to_default=(w > 0 and h > 0), upsample_size=args.resize_out_ratio)
 
-        logger.debug('show+')
-        cv2.putText(image,
-                    "angle: " + str(angle) + ", FPS: %f" % (1.0 / (time.time() - fps_time)),
-                    (10, 10),  cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                    (0, 255, 0), 2)
-        if angle != -1 and angle < NECK_ANGLE_THRESHOLD:
-            cv2.imshow('tf-pose-estimation result', image)
-            if cv2.waitKey(1) == 27:
-                break
-            time.sleep(2)
-            cv2.destroyAllWindows()
+    logger.debug('postprocess+')
+    image, angle = TfPoseEstimator.draw_humans(image, humans, imgcopy=False)
+    if angle:
+        angle = int(angle[0])
+    else:
+        angle = -1
+    if angle != -1:
+        sql_cursor.execute(
+            """INSERT INTO neck_angle(angle) VALUES ({})""".format(angle)
+        )
+        sql_conn.commit()
+        count += 1
+        if angle >= NECK_ANGLE_THRESHOLD:
+            successes += 1
+        logger.info("good/total neck angle: " + str(round(successes / count, 2)))
 
+    logger.debug('show+')
+    cv2.putText(image,
+                "angle: " + str(angle) + ", FPS: %f" % (1.0 / (time.time() - fps_time)),
+                (10, 10),  cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                (0, 255, 0), 2)
+    if angle != -1 and angle < NECK_ANGLE_THRESHOLD:
+        cv2.imshow('tf-pose-estimation result', image)
+        cv2.destroyAllWindows()
+
+    import pdb; pdb.set_trace()
+    import matplotlib.pyplot as plt
+    plt.imshow(image)
+    plt.show()
+    # cv2.imshow('tf-pose-estimation result', image)
     sql_conn.close()
-    cv2.destroyAllWindows()
+    # cv2.destroyAllWindows()
