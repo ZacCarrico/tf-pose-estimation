@@ -1,4 +1,5 @@
 import logging
+import os
 import matplotlib.pyplot as plt
 import argparse
 import cv2
@@ -26,20 +27,7 @@ NECK_ANGLE_THRESHOLD = 138
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='tf-pose-estimation image analyzer')
-    parser.add_argument('--path', type=str, help='if dir is provided, all images in dir are analyzed and saved to same dir')
-    parser.add_argument('--resize', type=str, default='0x0',
-                        help='if provided, resize images before they are processed. default=0x0, Recommends : 432x368 or 656x368 or 1312x736 ')
-    parser.add_argument('--resize-out-ratio', type=float, default=4.0,
-                        help = 'if provided, resize heatmaps before they are post-processed. default=1.0')
-    parser.add_argument('--model', type=str, default='mobilenet_thin',
-                        help='cmu / mobilenet_thin / mobilenet_v2_large / mobilenet_v2_small')
-    parser.add_argument('--tensorrt', type=str, default="False",
-                        help='for tensorrt process.')
-    args = parser.parse_args()
-
+def analyze_and_save_image(args):
     logger.debug('initialization %s : %s' % (args.model, get_graph_path(args.model)))
     w, h = model_wh(args.resize)
     if w > 0 and h > 0:
@@ -80,3 +68,25 @@ if __name__ == '__main__':
     prefix, suffix = args.path.split('.')
     analyzed_image_path = f"{prefix}_angle{angle}.jpg"
     plt.savefig(analyzed_image_path)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='tf-pose-estimation image analyzer')
+    parser.add_argument('--path', type=str, help='if dir is provided, all images in dir are analyzed and saved to same dir')
+    parser.add_argument('--resize', type=str, default='0x0',
+                        help='if provided, resize images before they are processed. default=0x0, Recommends : 432x368 or 656x368 or 1312x736 ')
+    parser.add_argument('--resize-out-ratio', type=float, default=4.0,
+                        help = 'if provided, resize heatmaps before they are post-processed. default=1.0')
+    parser.add_argument('--model', type=str, default='mobilenet_thin',
+                        help='cmu / mobilenet_thin / mobilenet_v2_large / mobilenet_v2_small')
+    parser.add_argument('--tensorrt', type=str, default="False",
+                        help='for tensorrt process.')
+    args = parser.parse_args()
+
+    if os.path.isdir(args.path):
+        files = [os.path.join(args.path, f) for f in os.listdir(args.path) if os.path.isfile(os.path.join(args.path, f))]
+        print(files)
+        for file in files:
+            args.path = file
+            analyze_and_save_image(args)
+    else:
+        analyze_and_save_image(args)
