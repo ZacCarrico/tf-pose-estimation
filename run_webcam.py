@@ -131,12 +131,18 @@ if __name__ == '__main__':
                     "angle: " + str(angle) + ", FPS: %f" % (1.0 / (time.time() - fps_time)),
                     (10, 10),  cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     (0, 255, 0), 2)
+        
+        # Only show window when neck angle indicates poor posture (below threshold)
         if angle != -1 and angle < NECK_ANGLE_THRESHOLD:
             cv2.imshow('tf-pose-estimation result', image)
-            if cv2.waitKey(1) == 27:
-                break
+            cv2.waitKey(1)  # Process the window event
             time.sleep(2)
             cv2.destroyAllWindows()
+            cv2.waitKey(1)  # Ensure the destroy event is processed
+        else:
+            # Check for ESC key to exit when no window is shown
+            if cv2.waitKey(1) == 27:
+                break
 
     sql_conn.close()
     cv2.destroyAllWindows()
