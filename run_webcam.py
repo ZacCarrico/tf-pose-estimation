@@ -20,6 +20,16 @@ logger.addHandler(ch)
 sql_conn = sqlite3.connect('posture.db')
 sql_cursor = sql_conn.cursor()
 
+# Create the neck_angle table if it doesn't exist
+sql_cursor.execute('''
+    CREATE TABLE IF NOT EXISTS neck_angle (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        angle INTEGER NOT NULL,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+''')
+sql_conn.commit()
+
 fh = logging.FileHandler('info.log', "w")
 fh.setLevel(logging.INFO)
 fh.setFormatter(formatter)
