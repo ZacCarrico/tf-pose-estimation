@@ -10,6 +10,11 @@ It works surprisingly well for letting you know when your posture has deteriorat
 If you don't sit up straight, the image window will pop up. Once your posture improves, it will
 stop popping up. There is a bit of delay between when the image is acquired and when it pops up (< 1 s).
 
+You will need to install swig  
+`brew install swig`
+and from the tf_pose/pafprocess dir run  
+`python setup.py build_ext --inplace`
+
 To run this with a webcam, position the webcam so it's facing you from the side and run
 `python run_webcam.py --model=mobilenet_thin --resize=432x368 --camera=0`
 You may have to adjust the `--camera` integer.
