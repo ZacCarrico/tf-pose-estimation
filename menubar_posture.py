@@ -3,8 +3,10 @@ import queue as Queue
 import sqlite3
 import threading
 import time
-import argparse
 import os
+import json
+import signal
+import sys
 
 import cv2
 import rumps
@@ -27,7 +29,7 @@ formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(messag
 fh.setFormatter(formatter)
 logger.addHandler(fh)
 
-# Console handler (optional)
+# Console handler
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 ch.setFormatter(formatter)
@@ -37,44 +39,59 @@ logger.info(f'Logging to: {log_file}')
 
 NECK_ANGLE_THRESHOLD = 138
 
-def str2bool(v):
-    return v.lower() in ("yes", "true", "t", "1")
+# Settings file location
+SETTINGS_DIR = os.path.expanduser('~/Library/Application Support/PostureMonitor')
+SETTINGS_FILE = os.path.join(SETTINGS_DIR, 'settings.json')
+os.makedirs(SETTINGS_DIR, exist_ok=True)
+
+def load_settings():
+    """Load settings from file"""
+    default_settings = {'default_camera': 0}
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r') as f:
+                return {**default_settings, **json.load(f)}
+    except Exception as e:
+        logger.warning(f"Failed to load settings: {e}")
+    return default_settings
+
+def save_settings(settings):
+    """Save settings to file"""
+    try:
+        with open(SETTINGS_FILE, 'w') as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save settings: {e}")
 
 def detect_cameras():
     """Detect available cameras"""
     available_cameras = []
-    for i in range(10):  # Check first 10 camera indices
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            ret, frame = cap.read()
-            if ret and frame is not None:
-                available_cameras.append(i)
+    for i in range(3):  # Check first 3 camera indices only
+        try:
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret and frame is not None and frame.size > 0:
+                    available_cameras.append(i)
+                    logger.info(f"Found camera {i}")
             cap.release()
-    return available_cameras
+        except Exception as e:
+            logger.warning(f"Error checking camera {i}: {e}")
+    return available_cameras if available_cameras else [0]
 
-# bufferless VideoCapture
-class VideoCapture:
-    def __init__(self, name):
-        self.cap = cv2.VideoCapture(name)
-        self.q = Queue.Queue()
-        t = threading.Thread(target=self._reader)
-        t.daemon = True
-        t.start()
-
-    def _reader(self):
-        while True:
-            ret, frame = self.cap.read()
-            if not ret:
-                break
-            if not self.q.empty():
-                try:
-                    self.q.get_nowait()
-                except Queue.Empty:
-                    pass
-            self.q.put(frame)
-
+# Simple VideoCapture without threading
+class SimpleVideoCapture:
+    def __init__(self, camera_id):
+        self.cap = cv2.VideoCapture(camera_id)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
     def read(self):
-        return self.q.get()
+        ret, frame = self.cap.read()
+        return frame if ret else None
+        
+    def release(self):
+        if self.cap:
+            self.cap.release()
 
 class PostureApp(rumps.App):
     def __init__(self):
@@ -88,11 +105,9 @@ class PostureApp(rumps.App):
         self.current_angle = -1
         self.good_posture_count = 0
         self.total_count = 0
-        self.selected_camera = 0  # Default camera
-        self.available_cameras = []
-        
-        # Detect available cameras
-        self.detect_cameras_on_startup()
+        self.settings = load_settings()
+        self.selected_camera = self.settings.get('default_camera', 0)
+        self.available_cameras = detect_cameras()
         
         # Menu items
         self.start_button = rumps.MenuItem("Start Monitoring", callback=self.start_monitoring)
@@ -116,14 +131,15 @@ class PostureApp(rumps.App):
             self.angle_item, 
             self.stats_item
         ]
+        
+        # Setup signal handler for clean exit
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        signal.signal(signal.SIGINT, self.signal_handler)
     
-    def detect_cameras_on_startup(self):
-        """Detect available cameras on startup"""
-        logger.info("Detecting available cameras...")
-        self.available_cameras = detect_cameras()
-        if not self.available_cameras:
-            self.available_cameras = [0]  # Fallback to camera 0
-        logger.info(f"Available cameras: {self.available_cameras}")
+    def signal_handler(self, signum, frame):
+        """Handle system signals for clean shutdown"""
+        logger.info(f"Received signal {signum}, shutting down...")
+        self.cleanup_and_exit()
     
     def setup_camera_menu(self):
         """Setup camera selection submenu"""
@@ -137,12 +153,14 @@ class PostureApp(rumps.App):
     
     def select_camera(self, sender):
         """Handle camera selection"""
-        # Extract camera ID from menu title
         cam_id = int(sender.title.split()[-1])
         
-        # Update selected camera
         old_camera = self.selected_camera
         self.selected_camera = cam_id
+        
+        # Save to settings
+        self.settings['default_camera'] = cam_id
+        save_settings(self.settings)
         
         # Update menu checkmarks
         for item in self.camera_menu.values():
@@ -150,30 +168,22 @@ class PostureApp(rumps.App):
         sender.state = True
         
         logger.info(f"Camera changed from {old_camera} to {cam_id}")
-        
-        # If monitoring is running, restart with new camera
-        if self.running:
-            logger.info("Restarting monitoring with new camera...")
-            self.stop_monitoring(None)
-            time.sleep(1)
-            self.start_monitoring(None)
-        
-    def setup_database(self):
-        """Initialize SQLite database"""
-        self.sql_conn = sqlite3.connect('posture.db', check_same_thread=False)
-        self.sql_cursor = self.sql_conn.cursor()
-        self.sql_cursor.execute('''
-            CREATE TABLE IF NOT EXISTS neck_angle (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                angle INTEGER NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        self.sql_conn.commit()
     
-    def setup_camera_and_estimator(self):
-        """Initialize camera and pose estimator"""
+    def setup_components(self):
+        """Initialize camera, estimator and database"""
         try:
+            # Setup database
+            self.sql_conn = sqlite3.connect('posture.db')
+            self.sql_cursor = self.sql_conn.cursor()
+            self.sql_cursor.execute('''
+                CREATE TABLE IF NOT EXISTS neck_angle (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    angle INTEGER NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            self.sql_conn.commit()
+            
             # Setup pose estimator
             model = 'mobilenet_thin'
             resize = '432x368'
@@ -185,20 +195,35 @@ class PostureApp(rumps.App):
                 self.estimator = TfPoseEstimator(get_graph_path(model), target_size=(432, 368), trt_bool=False)
             
             # Setup camera
-            self.camera = VideoCapture(self.selected_camera)
+            self.camera = SimpleVideoCapture(self.selected_camera)
             test_image = self.camera.read()
+            if test_image is None:
+                raise Exception("Failed to read from camera")
+                
             logger.info(f'Camera initialized: {test_image.shape[1]}x{test_image.shape[0]}')
             return True
             
         except Exception as e:
-            logger.error(f"Failed to setup camera/estimator: {e}")
+            logger.error(f"Failed to setup components: {e}")
             return False
     
     def monitoring_loop(self):
-        """Main monitoring loop that runs in a separate thread"""
+        """Simplified monitoring loop"""
+        logger.info("Starting monitoring loop")
+        consecutive_errors = 0
+        
         while self.running:
             try:
                 image = self.camera.read()
+                if image is None:
+                    consecutive_errors += 1
+                    if consecutive_errors > 5:
+                        logger.error("Too many camera read failures")
+                        break
+                    time.sleep(0.5)
+                    continue
+                
+                consecutive_errors = 0
                 
                 # Pose estimation
                 humans = self.estimator.inference(image, resize_to_default=True, upsample_size=4.0)
@@ -208,97 +233,144 @@ class PostureApp(rumps.App):
                     self.current_angle = int(angle[0])
                 else:
                     self.current_angle = -1
-                    
-                # Update statistics
+                
+                # Add text overlay
+                cv2.putText(image, f"Angle: {self.current_angle}", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                
+                # Update statistics and UI
                 if self.current_angle != -1:
-                    self.sql_cursor.execute(
-                        "INSERT INTO neck_angle(angle) VALUES (?)", (self.current_angle,)
-                    )
-                    self.sql_conn.commit()
+                    try:
+                        self.sql_cursor.execute("INSERT INTO neck_angle(angle) VALUES (?)", (self.current_angle,))
+                        self.sql_conn.commit()
+                    except Exception as e:
+                        logger.error(f"Database error: {e}")
+                        
                     self.total_count += 1
-                    
                     if self.current_angle >= NECK_ANGLE_THRESHOLD:
                         self.good_posture_count += 1
                     
-                    # Update menu items
                     good_percentage = round((self.good_posture_count / self.total_count) * 100, 1)
                     self.angle_item.title = f"Current Angle: {self.current_angle}°"
                     self.stats_item.title = f"Good Posture: {good_percentage}%"
                     
-                    # Show warning window for poor posture
+                    # Show window for poor posture - SIMPLIFIED approach
                     if self.current_angle < NECK_ANGLE_THRESHOLD:
-                        self.title = "🔴"  # Red circle for poor posture
-                        # Show webcam window like in run_webcam.py
-                        cv2.imshow('tf-pose-estimation result', image)
-                        cv2.waitKey(1)  # Process the window event
-                        time.sleep(2)
-                        cv2.destroyAllWindows()
-                        cv2.waitKey(1)  # Ensure the destroy event is processed
-                    else:
-                        self.title = "🟢"  # Green circle for good posture
+                        self.title = "🔴"
+                        # Show window immediately and briefly
+                        cv2.namedWindow('Posture Alert', cv2.WINDOW_NORMAL)
+                        cv2.imshow('Posture Alert', image)
+                        cv2.waitKey(1)
                         
+                        # Brief pause, checking for stop signal
+                        for _ in range(10):  # 1 second total
+                            if not self.running:
+                                break
+                            time.sleep(0.1)
+                        
+                        cv2.destroyWindow('Posture Alert')
+                        cv2.waitKey(1)
+                    else:
+                        self.title = "🟢"
                 else:
                     self.angle_item.title = "Current Angle: No person detected"
-                    self.title = "⚪"  # White circle when no person detected
+                    self.title = "⚪"
                 
-                time.sleep(0.1)  # Small delay to prevent excessive CPU usage
+                # Small delay
+                time.sleep(0.2)
                 
             except Exception as e:
-                logger.error(f"Error in monitoring loop: {e}")
+                consecutive_errors += 1
+                logger.error(f"Monitoring loop error: {e}")
+                if consecutive_errors > 10:
+                    logger.error("Too many errors, stopping")
+                    break
                 time.sleep(1)
+        
+        logger.info("Monitoring loop ended")
     
     @rumps.clicked("Start Monitoring")
     def start_monitoring(self, _):
         if not self.running:
-            logger.info("Starting posture monitoring...")
+            logger.info("Starting monitoring...")
             
-            # Setup components
-            if not self.setup_camera_and_estimator():
-                rumps.alert("Error", "Failed to initialize camera or pose estimator")
+            if not self.setup_components():
+                rumps.alert("Error", "Failed to initialize components")
                 return
-                
-            self.setup_database()
             
-            # Start monitoring
             self.running = True
             self.monitoring_thread = threading.Thread(target=self.monitoring_loop)
             self.monitoring_thread.daemon = True
             self.monitoring_thread.start()
             
-            # Update UI
             self.status_item.title = "Status: Running"
             self.start_button.title = "Start Monitoring (Running)"
-            self.title = "⚪"  # White circle when starting
+            self.title = "⚪"
             
-            logger.info("Posture monitoring started")
+            logger.info("Monitoring started")
     
-    @rumps.clicked("Stop Monitoring") 
+    @rumps.clicked("Stop Monitoring")
     def stop_monitoring(self, _):
         if self.running:
-            logger.info("Stopping posture monitoring...")
+            logger.info("Stopping monitoring...")
             self.running = False
             
-            if self.monitoring_thread:
-                self.monitoring_thread.join(timeout=3)
+            # Wait a moment for thread to notice
+            time.sleep(0.3)
             
-            # Clean up
-            if self.sql_conn:
-                try:
-                    self.sql_conn.close()
-                except:
-                    pass
-                    
-            cv2.destroyAllWindows()
+            # Clean shutdown
+            self.cleanup_resources()
             
-            # Update UI
+            # Wait for thread
+            if self.monitoring_thread and self.monitoring_thread.is_alive():
+                self.monitoring_thread.join(timeout=1)
+            
             self.status_item.title = "Status: Not Running"
             self.angle_item.title = "Current Angle: --"
             self.stats_item.title = "Good Posture: --%"
             self.start_button.title = "Start Monitoring"
-            self.title = "⚪"  # White circle when stopped
+            self.title = "⚪"
             
-            logger.info("Posture monitoring stopped")
+            logger.info("Monitoring stopped")
+    
+    def cleanup_resources(self):
+        """Clean up all resources safely"""
+        try:
+            # Close any OpenCV windows
+            cv2.destroyAllWindows()
+            cv2.waitKey(1)
+        except:
+            pass
+            
+        try:
+            if self.camera:
+                self.camera.release()
+                self.camera = None
+        except Exception as e:
+            logger.error(f"Camera cleanup error: {e}")
+        
+        try:
+            if self.sql_conn:
+                self.sql_conn.close()
+                self.sql_conn = None
+        except Exception as e:
+            logger.error(f"Database cleanup error: {e}")
+    
+    def cleanup_and_exit(self):
+        """Final cleanup and exit"""
+        if self.running:
+            self.running = False
+            time.sleep(0.5)
+        self.cleanup_resources()
+        sys.exit(0)
 
 if __name__ == "__main__":
-    app = PostureApp()
-    app.run()
+    try:
+        app = PostureApp()
+        app.run()
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+    except Exception as e:
+        logger.error(f"App error: {e}")
+    finally:
+        cv2.destroyAllWindows()
