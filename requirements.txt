@@ -48,10 +48,12 @@ pyobjc-core==11.1
 pyobjc-framework-Cocoa==11.1
 pyobjc-framework-Quartz==11.1
 pyparsing==3.2.3
+pystray==0.19.5
 python-dateutil==2.9.0.post0
 pyzmq==27.0.2
 requests==2.32.5
 rich==14.1.0
+rumps==0.4.0
 scikit-image==0.25.2
 scipy==1.16.1
 setuptools==80.9.0
